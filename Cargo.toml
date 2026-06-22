@@ -1,10 +1,10 @@
 [workspace]
-members = []
+members = ["binary-crate", "crate"]
 resolver = "3"
 
 [workspace.package]
 edition = "2024"
-license = ""
+license = "MIT"
 homepage = ""
 description = ""
 keywords = []

@@ -13,7 +13,7 @@ env:
   CARGO_TERM_COLOR: always
   # TODO: configure your crates (dependency order for publishing)
   BINARY_CRATES: '["binary-crate"]'
-  PUBLISH_CRATES: '["library-crate"]'
+  PUBLISH_CRATES: '["crate", "binary-crate"]'
 
 jobs:
   configure:
