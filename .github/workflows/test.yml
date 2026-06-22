@@ -26,7 +26,7 @@ jobs:
     name: test (${{ matrix.name }})
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Build cache
@@ -48,7 +48,7 @@ jobs:
     name: codecov (${{ matrix.package }})
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
