@@ -40,9 +40,29 @@ src/
 
 Tests **never** live in the same file as production code. Integration tests remain under each crate's `tests/` directory at the crate root.
 
-### 1.4 Cargo features for optional surfaces
+### 1.4 Cargo features for slim builds
 
-When a crate exposes optional integrations (network, GUI backend, extra codecs), gate them behind **per-integration Cargo features** so CI can build and test minimal, default, and full feature matrices without bitrot.
+All crates must separate **logical features** into optional Cargo features whenever practical. Downstream users should be able to depend on or build a **slimmer package** by disabling defaults and enabling only what they need.
+
+**Rules:**
+
+- **One feature per logical capability** — e.g. `network`, `json`, `tui` — not a single catch-all `full` or `extras` bucket.
+- **Heavy or niche dependencies** stay behind features with `optional = true` in `Cargo.toml`; they must not land in `[dependencies]` unless every consumer needs them.
+- **`default` features** are the smallest useful subset for typical use — not “everything we ship”.
+- Gate optional code at **module boundaries** with `#[cfg(feature = "...")]`; optional modules follow the same `mod.rs` + `tests.rs` layout and include feature-gated tests.
+- When feature A requires feature B, express that with `feature-b = ["feature-a"]` in `Cargo.toml` so invalid combinations fail at resolve time.
+
+**CI feature matrix (three levels):**
+
+Workspace CI already runs build, clippy, and test jobs across all three levels on every push and pull request:
+
+| Level | Flag | What it validates |
+| ----- | ---- | ----------------- |
+| Minimal | `--no-default-features` | Core compiles with no optional surface enabled |
+| Default | *(none)* | Typical end-user consumption |
+| Full | `--all-features` | Every optional integration compiles and tests together |
+
+A new feature is not done until it passes **all three** levels locally (see §8). Do not merge feature-gated code that only builds under `--all-features`.
 
 ---
 
@@ -254,7 +274,7 @@ Justify every new dependency in the change that introduces it. Prefer std and ex
 | Tests (all features) | `cargo test --workspace --all-features` |
 | Documentation | `cargo doc --workspace --no-deps` |
 
-CI runs the same gates on push and pull request. A green local run should match a green CI run.
+CI runs the same gates on push and pull request across the **three-level feature matrix** (§1.4): `--no-default-features`, default, and `--all-features`. A green local run should match a green CI run.
 
 ---
 
@@ -285,6 +305,8 @@ Before opening a pull request:
 - [ ] Config files (if any) are TOML; examples live under `examples/`.
 - [ ] Logging uses `tracing`; subscriber setup is in `logger/`.
 - [ ] UI elements (if any) are separate files under `ui/`.
+- [ ] Optional capabilities are behind Cargo features; defaults stay minimal (§1.4).
+- [ ] New features pass build, clippy, and tests at all three CI levels (`--no-default-features`, default, `--all-features`).
 - [ ] Dependencies are latest, active, and justified.
 - [ ] Tests cover new behavior; coverage does not regress meaningfully.
 - [ ] All quality gates in §8 pass locally.
