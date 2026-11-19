@@ -1,0 +1,45 @@
+# Template repository only: scripts/init.sh deletes this workflow along with itself.
+# Initialises a copy of the template both ways and runs every gate on the result, so the
+# template can't ship an init script that leaves a broken project.
+name: Template
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  init:
+    name: init (${{ matrix.variant }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { variant: binary and library, args: "my-app --description 'A demo app'" }
+          - { variant: library only, args: "my-lib --lib-only" }
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: typos,cargo-deny
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: template-${{ matrix.variant }}
+      - name: Initialise
+        run: |
+          git config user.name "Template CI"
+          eval scripts/init.sh ${{ matrix.args }} 2>&1 | tee init.log
+          ! grep -q '^warning:' init.log
+          rm init.log
+      - name: Gates on the new project
+        run: scripts/gates.sh

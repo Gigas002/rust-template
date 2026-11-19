@@ -6,8 +6,8 @@ use std::{
     process::{Command, Output, Stdio},
 };
 
-/// Runs skel with `home` as its HOME and XDG config dir and nothing else in its environment.
-fn skel(home: &Path, args: &[&str]) -> Output {
+/// Runs the binary with `home` as its HOME and XDG config dir and nothing else in its environment.
+fn run_bin(home: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_skel"))
         .args(args)
         .env_clear()
@@ -28,7 +28,7 @@ fn stderr(output: &Output) -> &str {
 #[test]
 fn greets_with_the_defaults() {
     let home = tempfile::tempdir().unwrap();
-    let output = skel(home.path(), &["--no-config"]);
+    let output = run_bin(home.path(), &["--no-config"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "Hello, world!\n");
 }
@@ -39,7 +39,7 @@ fn the_command_line_overrides_the_config_file() {
     let config = home.path().join("custom.toml");
     std::fs::write(&config, "name = \"file\"\ngreeting = \"Hi\"\n").unwrap();
 
-    let output = skel(home.path(), &["--config", config.to_str().unwrap(), "cli"]);
+    let output = run_bin(home.path(), &["--config", config.to_str().unwrap(), "cli"]);
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(stdout(&output), "Hi, cli!\n");
 }
@@ -52,7 +52,7 @@ fn reads_the_default_config_location() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("config.toml"), "greeting = \"Howdy\"\n").unwrap();
 
-    let output = skel(home.path(), &[]);
+    let output = run_bin(home.path(), &[]);
     assert_eq!(stdout(&output), "Howdy, world!\n", "{}", stderr(&output));
 }
 
@@ -62,7 +62,7 @@ fn an_unknown_config_key_exits_2_and_is_named() {
     let config = home.path().join("config.toml");
     std::fs::write(&config, "colour = \"red\"\n").unwrap();
 
-    let output = skel(home.path(), &["--config", config.to_str().unwrap()]);
+    let output = run_bin(home.path(), &["--config", config.to_str().unwrap()]);
     assert_eq!(output.status.code(), Some(2));
     assert!(stderr(&output).contains("colour"), "{}", stderr(&output));
     assert!(stdout(&output).is_empty());
@@ -71,7 +71,7 @@ fn an_unknown_config_key_exits_2_and_is_named() {
 #[test]
 fn invalid_input_exits_1_with_a_message() {
     let home = tempfile::tempdir().unwrap();
-    let output = skel(home.path(), &["--no-config", "   "]);
+    let output = run_bin(home.path(), &["--no-config", "   "]);
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(stderr(&output), "error: the name is empty\n");
 }
