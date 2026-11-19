@@ -1,6 +1,14 @@
 # Architecture
 
-This document defines how Rust projects in this workspace are structured, how configuration and settings flow through binaries, and what must hold before any change is committed.
+How projects made from this template are structured, and what must hold before any change
+is committed. These are rules, not suggestions: "must" means a reviewer (or an audit) treats
+a violation as a defect. When a rule doesn't fit a project, change this document in the same
+commit and record why in [`DECISIONS.md`](DECISIONS.md).
+
+<!-- template:start -->
+The template's `crate/` and `binary-crate/` are placeholders (`scripts/init.sh` names
+them); the rules below describe the project they grow into.
+<!-- template:end -->
 
 ---
 
@@ -8,305 +16,433 @@ This document defines how Rust projects in this workspace are structured, how co
 
 ### 1.1 Separation of concerns
 
-Each module owns one responsibility. Boundaries are explicit:
+Each module owns one responsibility, and the boundaries are explicit:
 
-- **Library crates** expose domain logic, types, and APIs — no CLI parsing, no process lifecycle, no UI rendering.
-- **Binary crates** wire modules together: parse invocation, resolve settings once, initialize logging, then hand off to the application layer.
-- **Cross-cutting infrastructure** (logging, configuration loading, settings resolution) lives in dedicated modules — never mixed into business logic or UI code.
+- **Library crates** hold domain logic, types and APIs: no CLI parsing, no process
+  lifecycle, no config files, no UI rendering, no logging setup.
+- **Binary crates** wire things together: parse the command line, resolve settings once,
+  start logging, then hand off to the application layer.
+- **Cross-cutting infrastructure** (logging, config loading, settings resolution) lives in
+  its own modules, never mixed into business logic or UI code.
 
-Do not reach across layers. A UI module must not read environment variables; a library must not parse CLI flags.
+Don't reach across layers: a UI module doesn't read environment variables, a library
+doesn't parse flags.
 
 ### 1.2 Slim `main`
 
-`main.rs` is an entry point only. It may:
+`main.rs` is an entry point only. It:
 
-1. Parse CLI arguments (raw options, flags, subcommands).
-2. Call the settings resolver with those CLI values.
-3. Initialize logging from the resolved settings.
-4. Construct and run the application (or dispatch to a subcommand handler).
+1. Parses the command line (`cli/`).
+2. Loads the config file (`config/`) and resolves `Settings` (`settings/`).
+3. Starts logging from the settings (`logger/`).
+4. Runs the application (`app/`) and turns the outcome into an exit code (§4.3).
 
-Everything else — application loops, protocol handling, rendering, file I/O beyond config — belongs in separate modules (`app/`, `utils/`, domain-specific folders).
+Everything else belongs in modules.
 
 ### 1.3 Directory modules with sibling tests
 
-Every logical module lives in **its own folder** with two files:
+Every module lives in its own folder, with its unit tests in a sibling file:
 
 ```text
 src/
   feature/
-    mod.rs      # implementation
-    tests.rs    # unit tests for this module
+    mod.rs      # implementation, ending its imports with `#[cfg(test)] mod tests;`
+    tests.rs    # unit tests for this module (`use super::*;`)
 ```
 
-Tests **never** live in the same file as production code. Integration tests remain under each crate's `tests/` directory at the crate root.
+Tests never live in the same file as production code. Integration tests go in the crate's
+`tests/` directory. A module grows sub-modules as sub-folders with the same layout.
 
 ### 1.4 Cargo features for slim builds
 
-All crates must separate **logical features** into optional Cargo features whenever practical. Downstream users should be able to depend on or build a **slimmer package** by disabling defaults and enabling only what they need.
+Separate logical capabilities into optional Cargo features, so users can build or depend
+on a slimmer package.
 
-**Rules:**
+- **One feature per capability** (`network`, `json`, `tui`), not one catch-all `full`.
+- **Heavy or niche dependencies** are `optional = true` behind their feature.
+- **`default`** is the smallest useful set for typical use, not everything.
+- Gate optional code at **module boundaries** with `#[cfg(feature = "...")]`; the module
+  keeps the `mod.rs` + `tests.rs` layout, and its tests run only with the feature.
+- A feature that needs another says so: `b = ["a"]`.
+- The binary forwards library features: `extra = ["lib<name>/extra"]`.
 
-- **One feature per logical capability** — e.g. `network`, `json`, `tui` — not a single catch-all `full` or `extras` bucket.
-- **Heavy or niche dependencies** stay behind features with `optional = true` in `Cargo.toml`; they must not land in `[dependencies]` unless every consumer needs them.
-- **`default` features** are the smallest useful subset for typical use — not “everything we ship”.
-- Gate optional code at **module boundaries** with `#[cfg(feature = "...")]`; optional modules follow the same `mod.rs` + `tests.rs` layout and include feature-gated tests.
-- When feature A requires feature B, express that with `feature-b = ["feature-a"]` in `Cargo.toml` so invalid combinations fail at resolve time.
-
-**CI feature matrix (three levels):**
-
-Workspace CI already runs build, clippy, and test jobs across all three levels on every push and pull request:
-
-| Level | Flag | What it validates |
-| ----- | ---- | ----------------- |
-| Minimal | `--no-default-features` | Core compiles with no optional surface enabled |
-| Default | *(none)* | Typical end-user consumption |
-| Full | `--all-features` | Every optional integration compiles and tests together |
-
-A new feature is not done until it passes **all three** levels locally (see §8). Do not merge feature-gated code that only builds under `--all-features`.
+Everything must build, lint and test at **three levels**: `--no-default-features`
+(minimal), default, and `--all-features` (full). The gates (§11) run all three; a feature
+isn't done until it passes them.
 
 ---
 
 ## 2. Repository layout
 
 ```text
-workspace-root/
-  Cargo.toml              # workspace members, shared metadata, workspace.dependencies
-  deny.toml               # license / advisory / ban policy
-  examples/               # example TOML configs, fixtures, golden files
-  docs/
-    ARCHITECTURE.md         # this file
-  <lib-crate>/
-    src/
-      lib.rs
-      <module>/
-        mod.rs
-        tests.rs
-  <binary-crate>/
-    src/
-      main.rs             # slim entry point
-      cli/                # argument definitions only
-        mod.rs
-        tests.rs
-      config/             # TOML load + deserialize only
-        mod.rs
-        tests.rs
-      settings/           # unified resolver (cli > config > defaults)
-        mod.rs
-        tests.rs
-      logger/             # tracing subscriber setup
-        mod.rs
-        tests.rs
-      app/                # application logic (no CLI, no raw config)
-        mod.rs
-        tests.rs
-      ui/                 # userspace apps only — see §4
-        mod.rs
-        <element>.rs      # one UI element per file
-        tests.rs
-      utils/              # shared helpers that do not belong elsewhere
-        mod.rs
-        tests.rs
-    tests/                # integration tests
+README.md               # for users: what it is, install, usage, configuration
+CHANGELOG.md            # Keep a Changelog; every change adds a line under Unreleased
+Cargo.toml              # workspace: members, metadata, every dependency version, lints
+deny.toml               # licenses, advisories, bans, sources
+.github/workflows/      # build, lint, test (+codecov), doc, typos, deny (+daily), deploy (tags)
+scripts/                # gates.sh, stress.sh, coverage.sh, measure.py
+examples/               # example config files, fixtures; each one tested (§7.5)
+docs/
+  ARCHITECTURE.md       # this file
+  DECISIONS.md          # why things are the way they are (dependencies above all)
+  PLAN.md               # the current plan and its progress, when there is one
+  AUDIT.md              # the last audit's report, when there is one
+  agents/               # optional: how coding agents work here
+  templates/            # PLAN.md and AUDIT.md skeletons
+AGENTS.md, CLAUDE.md,   # optional: entry points for coding agents; the project doesn't
+  .claude/              #   depend on them, delete them if unused
+lib<name>/              # library crate
+  src/
+    lib.rs              # module list and re-exports only
+    error/              # the crate's error type
+    <module>/
+      mod.rs
+      tests.rs
+<name>/                 # binary crate
+  src/
+    main.rs             # slim entry point (§1.2)
+    cli/                # argument definitions (clap)
+    config/             # TOML discovery, read, deserialize
+    settings/           # cli > config > defaults → Settings
+    logger/             # tracing subscriber setup
+    app/                # application logic; sees Settings only
+    ui/                 # interactive apps only (§4.1)
+  tests/                # integration tests: run the real binary (§7.3)
 ```
 
-Workspace members are declared in the root `Cargo.toml`. Shared dependency versions belong in `[workspace.dependencies]`; crates reference them with `{ workspace = true }`.
+Shared dependency versions live in `[workspace.dependencies]`, the internal library
+included; crates use `name.workspace = true`. Every crate has `[lints] workspace = true`.
 
 ---
 
-## 3. Settings resolution (unified resolver)
+## 3. Settings resolution
 
-All user-facing binaries resolve configuration through a **single pipeline**. Raw CLI and config-file values must not leak past the settings boundary.
+All binaries resolve configuration through one pipeline. Raw CLI values and config-file
+values never travel past the resolver.
 
 ### 3.1 Precedence
 
-Resolution order is fixed:
-
 ```text
-CLI arguments  >  config file (TOML)  >  built-in defaults
+command line  >  config file (TOML)  >  built-in defaults
 ```
 
-Higher layers override lower layers field by field.
+Field by field: a flag overrides its key, a key overrides its default.
 
 ### 3.2 Flow
 
 ```mermaid
 flowchart LR
-  CLI["cli/ — parse args in main"]
-  CFG["config/ — load TOML if present"]
-  DEF["defaults in settings/"]
-  SET["Settings struct"]
-  APP["app/, ui/, utils/"]
-
-  CLI --> SET
-  CFG --> SET
-  DEF --> SET
-  SET --> APP
+  CLI["cli/ — parsed in main"] --> SET["settings::resolve"]
+  CFG["config/ — FileConfig, if any"] --> SET
+  DEF["Settings::default()"] --> SET
+  SET --> APP["app/, ui/"]
 ```
 
-1. **`main`** parses CLI via `cli/` and obtains a `CliOptions` (or equivalent) struct. This is the **only** place CLI parsing happens.
-2. **`config/`** loads and deserializes a TOML file when a path is provided or a conventional location exists. It returns a `FileConfig` (or `None`). This module does not apply precedence — it only reads files.
-3. **`settings/`** accepts `CliOptions` and optional `FileConfig`, merges them over defaults, and returns a single **`Settings`** object (owned, fully resolved).
-4. **`logger/`** is initialized from `Settings` (log level, output target).
-5. From this point forward, **only `Settings`** is passed through the call graph. No function below the resolver may accept `CliOptions`, raw `clap` types, or unparsed config paths.
+1. `main` parses the command line into `Cli`. This is the only place that happens.
+2. `config/` finds and deserializes the file into `FileConfig` (every field `Option`). It
+   applies no precedence.
+3. `settings::resolve(&cli, file)` merges them over `Settings::default()` and returns a
+   fully resolved `Settings`.
+4. `logger::init` runs with the resolved settings.
+5. From here on, only `Settings` is passed down. No function below the resolver takes
+   `Cli`, clap types, or config paths.
 
-CLI flags and config file paths do not survive past settings resolution.
+### 3.3 Config files
 
-### 3.3 Config file format
-
-If the project uses a configuration file, it **must** be **TOML**. Place example files under `examples/`. The `config/` module owns deserialization types; `settings/` owns the merged `Settings` type consumed by the rest of the application.
+- The format is **TOML**. A user-named path (`--config`) must exist; the default location
+  (`dirs::config_dir()/<name>/config.toml`) is read only if present; `--no-config` skips it.
+- Deserialization structs use `#[serde(deny_unknown_fields)]`: a typo is an error that names
+  the key, never silently ignored. Errors name the file.
+- `examples/config.toml` shows **every key with its default value**, and a test resolves it
+  and compares with `Settings::default()`, so the example can't drift.
+- Behaviour is configured by flags and the config file, not by environment variables
+  (beyond the platform's own: `HOME`, XDG dirs).
 
 ---
 
-## 4. Userspace applications (CLI / TUI / GUI)
+## 4. User-facing binaries (CLI / TUI / GUI)
 
-Binaries that present an interface to the user follow additional layout rules on top of §2.
+### 4.1 UI code
 
-### 4.1 UI module
+All UI code lives under `ui/`, one file per element (`header.rs`, `status_bar.rs`, ...), with
+`tests.rs` alongside. Rendering, event handling and layout for a TUI or GUI belong there,
+not in `app/` or `main.rs`. `app/` coordinates domain logic and UI but doesn't render.
 
-All UI code lives under `ui/`. Each distinct visual or interactive element gets **its own file** inside that folder:
+### 4.2 Modules
 
-```text
-ui/
-  mod.rs           # re-exports, shared UI state wiring
-  header.rs
-  status_bar.rs
-  item_list.rs
-  tests.rs
-```
+| Module      | Responsibility                                               |
+| ----------- | ------------------------------------------------------------ |
+| `cli/`      | Argument and subcommand definitions; parsed only in `main`   |
+| `config/`   | TOML discovery, read, deserialize                            |
+| `settings/` | Merge cli + config + defaults → `Settings`                   |
+| `logger/`   | `tracing` subscriber from `Settings`                         |
+| `app/`      | The application: state, orchestration, I/O; writes to a `Write` it's given |
+| `ui/`       | Interactive rendering and input                              |
+| `commands/` | Subcommand handlers, one sub-folder each, when there are several |
 
-Rendering, event handling, and layout for a TUI (e.g. ratatui) or GUI framework belong here — not in `app/` or `main.rs`.
+### 4.3 Output and exit codes
 
-### 4.2 Supporting modules
+- **stdout is for output** (what the user asked for); **stderr is for diagnostics** (logs,
+  warnings, errors). Piping stdout must give clean data.
+- `app::run` writes to an `impl Write` it's given, so tests capture output without a
+  process. A closed stdout (`app | head`) is not an error: exit 0.
+- Exit codes: `0` success, `1` the operation failed, `2` bad usage or a bad config file
+  (clap uses 2 for usage errors too). Document any others in the README.
+- Errors print as one line, `error: <message>`, naming the input or path that was wrong.
 
-| Module       | Responsibility                                              |
-| ------------ | ----------------------------------------------------------- |
-| `cli/`       | Argument and subcommand definitions; parsed only in `main`  |
-| `config/`    | TOML discovery, read, deserialize                           |
-| `settings/`  | Merge cli + config + defaults → `Settings`                  |
-| `logger/`    | `tracing` subscriber init from `Settings`                   |
-| `app/`       | Application state machine, domain orchestration, I/O loops  |
-| `utils/`     | Pure helpers with no settings or UI dependencies            |
+### 4.4 Interaction
 
-`app/` coordinates between domain logic and `ui/` but does not render or parse CLI.
-
-### 4.3 CLI-only binaries
-
-A minimal CLI without a persistent UI still uses `cli/`, `settings/`, and `logger/` when it reads config or emits structured logs. Command dispatch handlers live in `app/` or dedicated `commands/` submodules — not in `main.rs`.
+- Prompts treat cancel (Esc) and interrupt (Ctrl-C) differently: cancel skips the
+  question, interrupt stops the program. Without a terminal, a prompt is an error that
+  points to the non-interactive flag; it never silently picks an answer.
+- Every interactive choice has a flag for scripts (`--yes`, `--auto`).
 
 ---
 
 ## 5. Logging
 
-Use the **`tracing`** ecosystem for structured logging.
+Use the **`tracing`** ecosystem.
 
-- **`logger/`** initializes the subscriber once from `Settings` (level filter, optional file/stdout layers).
-- Library crates emit `tracing` events; they do not configure subscribers.
-- Binary crates call `logger::init(&settings)` immediately after settings resolution and before starting `app/`.
-- Prefer spans for request-scoped or operation-scoped context; use fields for identifiers and counts.
-- Do not use `println!` for operational diagnostics in library or application code — use `tracing` levels appropriately (`error`, `warn`, `info`, `debug`, `trace`).
-
----
-
-## 6. Testing and coverage
-
-### 6.1 Unit tests
-
-- Co-locate unit tests in `tests.rs` next to each module's `mod.rs`.
-- Test public behavior and meaningful edge cases — not implementation trivia.
-- Mock external I/O at module boundaries; keep tests deterministic.
-
-### 6.2 Integration tests
-
-- Place cross-module and end-to-end tests in `<crate>/tests/`.
-- Use temporary directories and fixtures from `examples/` where applicable.
-
-### 6.3 Coverage expectations
-
-The project maintains **decent test coverage** across workspace crates. CI uploads coverage reports (see `.github/workflows/test.yml`). When adding modules or behavior:
-
-- New public API surface should have corresponding tests.
-- Bug fixes should include a regression test when practical.
-- Feature-gated code should be tested under the relevant feature flag in CI.
-
-Aim for meaningful coverage of branches and error paths, not arbitrary percentage targets on boilerplate.
+- `logger/` installs the subscriber once, from `Settings`, writing to stderr.
+- Libraries emit events and spans; they never install subscribers.
+- `println!` is for program output only, never for diagnostics.
+- Levels: `error` (the operation failed), `warn` (suspicious, continuing), `info` (what
+  happens), `debug` (how), `trace` (everything). Put identifiers and counts in fields.
+- Never log secrets: tokens and keys are wrapped in a type whose `Debug`/`Display` redact.
 
 ---
 
-## 7. Dependencies
+## 6. Errors
 
-### 7.1 Latest versions
-
-Use the **latest stable** releases of dependencies. Workspace crates pin versions in `[workspace.dependencies]`; individual crates reference them with `{ workspace = true }`. When adding or bumping a dependency, resolve to the current latest unless a documented incompatibility blocks it.
-
-Dependabot is configured for weekly scans; apply updates promptly after CI passes.
-
-### 7.2 Active crates only
-
-Do **not** add abandoned or deprecated dependencies. A crate is acceptable only when **all** of the following hold:
-
-- Latest release on crates.io is **within the past year**.
-- Upstream repository is **not archived**.
-- No outstanding RustSec advisory without a fixed upgrade path (`cargo deny check` must pass).
-
-Justify every new dependency in the change that introduces it. Prefer std and existing workspace crates over new transitive weight.
-
-### 7.3 Policy enforcement
-
-- `deny.toml` — licenses, advisories, duplicate versions, registry allowlist.
-- `cargo deny check` is part of the quality gate (§8).
+- Each library has one error enum (`thiserror`), one variant per failure a caller can act
+  on. Messages say what was wrong with which input: `cannot read /x/config.toml: ...`, not
+  `IO error`.
+- Binaries wrap library errors in their own enum (`#[from]`) and map them to exit codes in
+  `main`.
+- **No panic on input.** `unwrap`/`expect` only for invariants the code itself guarantees,
+  and `expect`'s message states the invariant. Anything that comes from a file, the network,
+  the user or another process is validated and returns an error.
+- An operation that fails part-way leaves things as they were (§8.3).
 
 ---
 
-## 8. Quality gates — required before every commit
+## 7. Testing
 
-**All** checks below must pass locally before committing. Do not push commits that fail any gate.
+### 7.1 Unit tests
 
-| Check | Command |
-| ----- | ------- |
+- In `tests.rs` next to the module (§1.3). Test behaviour and edge cases, not
+  implementation details.
+- Every bug fix comes with a regression test that **fails without the fix**: check it by
+  reverting the fix (`git stash push -- <file>`) and running the test.
+- Feature-gated code is tested under its feature; tests compiled at every level must pass
+  at every level (`cfg!(feature = "...")` for expectations that differ).
+
+### 7.2 Determinism
+
+- **No wall-clock assertions** and no `sleep` to wait for something: block on the event,
+  inject a clock, or test the logic without time. A test that can be slow on a loaded
+  machine will fail in CI.
+- No dependence on test order, the current directory, the locale or the machine.
+- New and changed tests must pass `scripts/stress.sh 20` (every test binary 20 times in
+  parallel). A test that fails there is rewritten or removed, never retried.
+
+### 7.3 Isolation
+
+Tests must never touch the user's real files, services or network:
+
+- Each test gets its own `tempfile::tempdir()`; no fixed paths under `/tmp`, nothing
+  shared between tests.
+- Code that writes outside its inputs (a trash dir, a cache) takes the location as a
+  parameter, so tests point it into their temp dir.
+- Integration tests run the real binary (`env!("CARGO_BIN_EXE_<name>")`) with
+  `env_clear()` and `HOME`/`XDG_*` set to a temp dir.
+- Network code is tested against a local mock server, never a live API.
+- Tests that need real hardware or services are `#[ignore]`, with the reason in the
+  attribute and a manual checklist in the docs.
+
+### 7.4 Integration tests
+
+In `<crate>/tests/`: the binary end to end, as a user runs it: exit codes, stdout and
+stderr, config precedence, and the error paths.
+
+### 7.5 Examples are tested
+
+Every file under `examples/` is loaded by a test: example configs parse and match the
+defaults, fixtures are used by the tests that need them.
+
+### 7.6 Coverage
+
+`scripts/coverage.sh` reports line and region coverage; CI shows it on every run. New
+public API and every error path get tests. Coverage shouldn't drop; there's no percentage
+target for its own sake.
+
+---
+
+## 8. Robustness and security
+
+Recurring defects found by audits of projects built this way. Check new code against them.
+
+### 8.1 Untrusted input
+
+- **Sizes and counts from outside are never trusted**: don't allocate, loop or recurse by
+  a number taken from a file, a header or the user without a bound. Clamp ranges to what
+  exists.
+- **Text that reaches the terminal** (names, descriptions, error messages quoting a
+  server) has control characters replaced, or is rejected where it enters: an escape
+  sequence can set the title, write the clipboard or hide text.
+- **Paths from outside** (archive entries, config values, names from a server) are
+  checked to stay inside the directory they belong to before anything is written or
+  removed.
+- **Encodings**: text files may have a BOM or not be UTF-8; read bytes and decode lossily
+  when the content is informational.
+
+### 8.2 Logic
+
+- Boolean filters with negation: `!(a == x && b == y)`, not `a != x && b != y`.
+  Test both halves.
+- Empty input (an empty archive, an empty list, a missing section) is an error or a
+  deliberate no-op, never a silent "success" that did nothing.
+- Lookups that "can't fail" in maps built from external data return an error when they do.
+
+### 8.3 Files and processes
+
+- Write files **atomically**: write a temporary file in the same directory, then rename.
+- **Prepare, then commit**: an operation that replaces something builds the new version
+  completely (extract, download, compute) before touching the old one.
+- Temporary files are deleted when the operation ends (a drop guard), and caches have an
+  eviction or a clean command.
+- Moving across filesystems is a copy: don't put large data in `/tmp` (often RAM) or
+  shared directories other users can create first.
+- External commands get arguments as a list, never through a shell string.
+
+### 8.4 Secrets and network
+
+- Secrets come from the config file or a credential helper, are redacted in `Debug` and
+  logs, and are sent only to the host they belong to.
+- Network calls have timeouts; retries are bounded; downloads are checked (size, checksum
+  when the source publishes one).
+
+---
+
+## 9. Performance
+
+- **Measure before and after** any change meant to be faster, and any change to a hot path:
+  `scripts/measure.py` gives median and minimum time and peak memory for commands. Put the
+  numbers in the commit message (and the audit report).
+- Optimize what a measurement shows matters. Prefer streaming over loading whole files,
+  borrowing over cloning in loops, and one pass over many.
+- Allocations sized by input must be bounded (§8.1).
+- Release builds are stripped (`[profile.release]`). Note binary size when adding a
+  dependency.
+
+---
+
+## 10. Dependencies
+
+### 10.1 Latest versions
+
+Use the latest stable release of every dependency; versions live in
+`[workspace.dependencies]`. Dependabot proposes updates weekly; apply them once CI passes.
+
+### 10.2 Active crates only
+
+A dependency is acceptable only when **all** of these hold:
+
+- Its latest release is **within the past year**.
+- Its repository is **not archived**.
+- It has no RustSec advisory, `unmaintained` included, without an upgrade
+  (`cargo deny check` passes).
+
+Prefer std and existing dependencies. Every new dependency gets an entry in
+[`DECISIONS.md`](DECISIONS.md): what it's for, the alternatives, its weight. Enable only the
+features you use (`default-features = false` where the defaults are heavy).
+
+### 10.3 Enforcement
+
+- `deny.toml`: allowed licenses, advisories, wildcard and source bans.
+- `cargo deny check` is a gate (§11), and `.github/workflows/deny.yml` also runs it
+  daily, because new advisories appear without any push.
+
+---
+
+## 11. Quality gates: required before every commit
+
+`scripts/gates.sh` runs them all locally; the lint, typos, deny, test and doc workflows
+run the same commands in CI.
+
+| Gate | Command |
+| ---- | ------- |
 | Formatting | `cargo fmt --all -- --check` |
 | Spelling | `typos` |
-| Licenses / advisories | `cargo deny check` |
-| Clippy (no default features) | `cargo clippy --workspace --all-targets --no-default-features -- -D warnings` |
-| Clippy (default features) | `cargo clippy --workspace --all-targets -- -D warnings` |
-| Clippy (all features) | `cargo clippy --workspace --all-targets --all-features -- -D warnings` |
-| Tests (no default features) | `cargo test --workspace --no-default-features` |
-| Tests (default features) | `cargo test --workspace` |
-| Tests (all features) | `cargo test --workspace --all-features` |
-| Documentation | `cargo doc --workspace --no-deps` |
+| Licenses, advisories, sources | `cargo deny check` |
+| Clippy ×3 levels | `cargo clippy --workspace --all-targets <level> -- -D warnings` |
+| Tests ×3 levels | `cargo test --workspace <level>` |
+| Documentation | `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features` |
 
-CI runs the same gates on push and pull request across the **three-level feature matrix** (§1.4): `--no-default-features`, default, and `--all-features`. A green local run should match a green CI run.
+Levels: `--no-default-features`, none, `--all-features`. One step at one level:
+`scripts/gates.sh clippy full`.
+
+Also, outside the gates:
+
+- `scripts/stress.sh 20` on every commit that adds or changes tests.
+- `scripts/coverage.sh` before and after larger changes.
+
+A gate that fails is fixed, never skipped. If the failure predates the change (a new
+advisory, a new clippy lint), fix it in its own commit first.
 
 ---
 
-## 9. Crate boundary guidelines
+## 12. Documentation and changelog
 
-When splitting a workspace into library and binary crates:
+Docs are part of the change that makes them true:
+
+- **README.md**: what the program does, install, usage, configuration, exit codes.
+- **CHANGELOG.md**: every user-visible change gets a line under `## [Unreleased]`, in
+  Added / Changed / Deprecated / Removed / Fixed / Security. Write for users: what changed
+  for them, not which function. No release date until the release is tagged.
+- **docs/**: anything a user or contributor needs beyond the README; this file when a rule
+  changes; `DECISIONS.md` when a choice is made.
+- **examples/**: kept in sync by tests (§7.5).
+- Public items have doc comments (`missing_docs` warns, and the gates deny warnings);
+  `# Errors` sections on fallible public functions.
+
+---
+
+## 13. Versioning
+
+- Semantic versioning. Before 1.0, a breaking change bumps the minor version.
+- One version for the workspace, in `[workspace.package]` and in the internal crate's
+  `[workspace.dependencies]` entry.
+- The version is bumped in its own commit before tagging; pushing a `v*` tag runs
+  `.github/workflows/deploy.yml`.
+
+---
+
+## 14. Crate boundaries
 
 | Layer | Responsibility | Typical dependencies |
 | ----- | -------------- | -------------------- |
-| **Library** | Domain types, algorithms, protocol logic | `thiserror`, `tracing` (events only), serde if needed |
-| **Binary** | CLI, settings, logging, app wiring, optional UI | Library crate, `clap`, `tracing-subscriber`, UI crates |
+| **Library** | Domain types, algorithms, protocols, I/O on paths it's given | `thiserror`, `tracing` (events), `serde` if needed |
+| **Binary** | CLI, config, settings, logging, app wiring, UI | the library, `clap`, `toml`, `dirs`, `tracing-subscriber`, UI crates |
 
-**Forbidden crossings:**
+Forbidden crossings:
 
-- Library crates must not depend on `clap`, UI frameworks, or subscriber initialization.
-- Binary `app/` and `ui/` modules must not re-parse CLI or re-read config files.
-- Tests in library crates must not require a running binary unless marked `#[ignore]` with a documented manual checklist.
+- Libraries don't depend on `clap`, UI frameworks or subscriber setup, and don't read
+  config files or environment variables.
+- `app/` and `ui/` don't parse the command line or read config files.
+- Library tests don't need the binary.
 
 ---
 
-## 10. Checklist for new work
+## 15. Checklist for every change
 
-Before opening a pull request:
-
-- [ ] New modules use `mod.rs` + `tests.rs` in a dedicated folder.
-- [ ] `main.rs` only parses CLI, resolves settings, inits logger, and starts the app.
-- [ ] Only `Settings` is passed below the settings resolver.
-- [ ] Config files (if any) are TOML; examples live under `examples/`.
-- [ ] Logging uses `tracing`; subscriber setup is in `logger/`.
-- [ ] UI elements (if any) are separate files under `ui/`.
-- [ ] Optional capabilities are behind Cargo features; defaults stay minimal (§1.4).
-- [ ] New features pass build, clippy, and tests at all three CI levels (`--no-default-features`, default, `--all-features`).
-- [ ] Dependencies are latest, active, and justified.
-- [ ] Tests cover new behavior; coverage does not regress meaningfully.
-- [ ] All quality gates in §8 pass locally.
+- [ ] Modules are folders with `mod.rs` + `tests.rs`; `main.rs` stays slim.
+- [ ] Only `Settings` passes below the resolver; config structs deny unknown fields.
+- [ ] Optional capabilities are features; all three levels pass.
+- [ ] Errors name their input; nothing panics on input (§6, §8).
+- [ ] Tests: behaviour and errors covered, isolated (§7.3), deterministic, stress-run;
+      bug fixes have a regression test that fails without the fix.
+- [ ] Performance-relevant changes have before/after numbers (§9).
+- [ ] New dependencies are current, maintained, justified in `DECISIONS.md`.
+- [ ] README, docs, examples and CHANGELOG match the change.
+- [ ] `scripts/gates.sh` passes.
