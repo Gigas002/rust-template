@@ -14,3 +14,8 @@ build/
 .cursor/
 .zed/
 .zeditor/
+
+# Coverage and profiling output
+*.profraw
+*.profdata
+lcov*.info
