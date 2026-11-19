@@ -1,4 +1,4 @@
-# cargo-deny policy (docs/ARCHITECTURE.md §7). `cargo deny check` is a quality gate.
+# cargo-deny policy (docs/ARCHITECTURE.md §10). `cargo deny check` is a quality gate.
 
 [graph]
 all-features = true

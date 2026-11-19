@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Time commands and their peak memory, and compare them (docs/ARCHITECTURE.md §7).
+"""Time commands and their peak memory, and compare them (docs/ARCHITECTURE.md §9).
 
     scripts/measure.py -n 30 'base=/tmp/base/skel --no-config' 'new=target/release/skel --no-config'
 

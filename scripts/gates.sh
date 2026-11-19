@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Quality gates (docs/ARCHITECTURE.md §8). CI runs these same steps, so a green local
+# Quality gates (docs/ARCHITECTURE.md §11). CI runs these same steps, so a green local
 # run means a green CI run. Nothing may be committed while a gate fails.
 #
 #   scripts/gates.sh                 every gate, every feature level

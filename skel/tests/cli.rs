@@ -1,5 +1,5 @@
 //! End-to-end tests: run the real binary. Every run gets its own temporary HOME and
-//! XDG dirs, so no test reads or writes the user's real config (docs/ARCHITECTURE.md §6.3).
+//! XDG dirs, so no test reads or writes the user's real config (docs/ARCHITECTURE.md §7.3).
 
 use std::{
     path::Path,

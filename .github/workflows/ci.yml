@@ -1,5 +1,5 @@
 # Quality gates on every push and pull request. Each job runs one step of
-# scripts/gates.sh, the same script used locally (docs/ARCHITECTURE.md §8).
+# scripts/gates.sh, the same script used locally (docs/ARCHITECTURE.md §11).
 # Branch protection only needs to require the "CI passed" job.
 name: CI
 

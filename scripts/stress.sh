@@ -2,7 +2,7 @@
 # Runs every test binary N times in parallel (default 20) to catch flaky tests: shared
 # temp paths, ordering assumptions, timing. Run it on any commit that adds or changes
 # tests. A test that fails here is removed or rewritten, never retried
-# (docs/ARCHITECTURE.md §6.4).
+# (docs/ARCHITECTURE.md §7.2).
 #
 #   scripts/stress.sh [N] [cargo test flags...]     e.g. scripts/stress.sh 30 --all-features
 set -uo pipefail

@@ -1,5 +1,5 @@
 # Weekly dependency updates, grouped so one pull request carries a week's worth.
-# CI must pass before merging; docs/ARCHITECTURE.md §7 asks for the latest versions.
+# CI must pass before merging; docs/ARCHITECTURE.md §10 asks for the latest versions.
 version: 2
 updates:
   - package-ecosystem: cargo
