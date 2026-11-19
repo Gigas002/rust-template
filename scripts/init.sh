@@ -143,7 +143,7 @@ EOF
 echo "==> template-only parts"
 # Markdown sections between <!-- template:start --> and <!-- template:end -->.
 for f in $(git ls-files '*.md'); do
-    perl -0pi -e 's/<!-- template:start -->.*?<!-- template:end -->\n?//gs' "$f"
+    perl -0pi -e 's/<!-- template:start -->.*?<!-- template:end -->\n?//gs; s/\n{3,}/\n\n/g' "$f"
 done
 git rm -q --ignore-unmatch .github/workflows/template.yml
 git rm -q scripts/init.sh
