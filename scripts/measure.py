@@ -7,40 +7,102 @@ Each LABEL=COMMAND runs N times (after warm-up runs), interleaved so that machin
 hits every command alike. Prints a Markdown table: median and minimum wall time, median
 peak RSS, and the change against the first command, ready for an AUDIT.md §3 row.
 
-Unix only (it reads peak RSS from wait4). Commands run without a shell; their stdout
-goes to /dev/null, and a run that exits non-zero stops the measurement.
+Unix only. Commands run without a shell; their stdout goes to /dev/null, and a run that
+exits non-zero stops the measurement.
+
+Each run is started by a small C helper (compiled with `cc` into target/ on first use),
+not by Python itself: Linux carries a process's pre-exec memory into its peak RSS, so a
+command forked straight from Python could never report less than Python's own ~10 MB.
+The helper's floor is about 1.6 MB (an empty C program), and the time it reports excludes Python's overhead.
 """
 
 import argparse
 import os
 import shlex
 import statistics
+import subprocess
 import sys
-import time
+from pathlib import Path
+
+# Forks, execs argv[1..], waits; writes "<nanoseconds> <ru_maxrss>" to fd 3 and exits
+# with the command's status (127 if it couldn't start, 128+N if killed by signal N).
+HELPER_C = r"""
+#include <stdio.h>
+#include <sys/resource.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
+
+int main(int argc, char **argv) {
+    if (argc < 2) return 2;
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    pid_t pid = fork();
+    if (pid < 0) return 126;
+    if (pid == 0) {
+        close(3);
+        execvp(argv[1], argv + 1);
+        perror(argv[1]);
+        _exit(127);
+    }
+    int status;
+    struct rusage usage;
+    if (wait4(pid, &status, 0, &usage) < 0) return 126;
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    long long ns = (end.tv_sec - start.tv_sec) * 1000000000LL + (end.tv_nsec - start.tv_nsec);
+    dprintf(3, "%lld %ld\n", ns, (long)usage.ru_maxrss);
+    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    return WEXITSTATUS(status);
+}
+"""
 
 
-def run_once(argv, cwd, env):
-    """Runs argv once; returns (seconds, peak RSS in bytes)."""
-    start = time.perf_counter()
+def helper_path():
+    """Builds the helper into the workspace's target dir if it isn't there yet."""
+    root = Path(__file__).resolve().parent.parent
+    target = Path(os.environ.get("CARGO_TARGET_DIR", root / "target"))
+    helper = target / "measure-helper" / "spawn"
+    source = helper.with_suffix(".c")
+    if not helper.exists() or not source.exists() or source.read_text() != HELPER_C:
+        helper.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(HELPER_C)
+        cc = os.environ.get("CC", "cc")
+        try:
+            subprocess.run([cc, "-O2", "-o", str(helper), str(source)], check=True)
+        except (OSError, subprocess.CalledProcessError) as err:
+            sys.exit(f"cannot build the measurement helper with {cc}: {err}")
+    return str(helper)
+
+
+def run_once(helper, argv, cwd, env):
+    """Runs argv once through the helper; returns (seconds, peak RSS in bytes)."""
+    read_end, write_end = os.pipe()
     pid = os.fork()
     if pid == 0:
         try:
+            os.close(read_end)
+            os.dup2(write_end, 3)
             devnull = os.open(os.devnull, os.O_WRONLY)
             os.dup2(devnull, 1)
             if cwd:
                 os.chdir(cwd)
-            os.execvpe(argv[0], argv, env)
+            os.execve(helper, [helper, *argv], env)
         except OSError as err:
-            print(f"cannot run {argv[0]}: {err}", file=sys.stderr)
-        os._exit(127)
-    _, status, usage = os.wait4(pid, 0)
-    elapsed = time.perf_counter() - start
+            print(f"cannot run the helper: {err}", file=sys.stderr)
+        os._exit(126)
+    os.close(write_end)
+    with os.fdopen(read_end) as pipe:
+        report = pipe.read().split()
+    _, status = os.waitpid(pid, 0)
     code = os.waitstatus_to_exitcode(status)
-    if code != 0:
+    if code != 0 or len(report) != 2:
         sys.exit(f"{shlex.join(argv)} exited with {code}")
+    nanoseconds, maxrss = map(int, report)
     # ru_maxrss is in KiB on Linux and bytes on macOS.
-    rss = usage.ru_maxrss if sys.platform == "darwin" else usage.ru_maxrss * 1024
-    return elapsed, rss
+    rss = maxrss if sys.platform == "darwin" else maxrss * 1024
+    return nanoseconds / 1e9, rss
 
 
 def fmt_time(seconds):
@@ -69,14 +131,15 @@ def main():
             parser.error(f"expected LABEL=COMMAND, got {item!r}")
         commands.append((label, shlex.split(command)))
 
+    helper = helper_path()
     for _ in range(args.warmup):
         for _, argv in commands:
-            run_once(argv, args.cwd, env)
+            run_once(helper, argv, args.cwd, env)
 
     samples = {label: [] for label, _ in commands}
     for _ in range(args.runs):
         for label, argv in commands:
-            samples[label].append(run_once(argv, args.cwd, env))
+            samples[label].append(run_once(helper, argv, args.cwd, env))
 
     print(f"| Command | Median | Min | Peak RSS (median) | vs {commands[0][0]} |")
     print("| ------- | ------ | --- | ----------------- | ------- |")
