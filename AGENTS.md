@@ -8,9 +8,9 @@ the links it gives for the task at hand.
 
 `scripts/init.sh` exists, so no project has been made from this repository yet. Whatever
 the user asks for ("I want an app that does X", "a library for Y"), start with
-[docs/agents/WORKFLOW.md](docs/agents/WORKFLOW.md): it bootstraps the project
-(`scripts/init.sh <name>`), plans it, builds it step by step, audits it, and prepares the
-release. The crates `crate/` and `binary-crate/` are placeholders that `init.sh` renames;
+[docs/agents/WORKFLOW.md](docs/agents/WORKFLOW.md). Its first step is to ask the user which
+license the project uses; then it bootstraps the project (`scripts/init.sh <name> --license
+<SPDX>`), plans it, builds it step by step, audits it, and prepares the release. The crates `crate/` and `binary-crate/` are placeholders that `init.sh` renames;
 their greeting code is replaced as real features land.
 
 If the user wants to change the template itself, work on it directly: keep `init.sh`

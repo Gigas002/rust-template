@@ -22,7 +22,7 @@ Template for rust projects. Configures:
 
 ## Scripts
 
-- `scripts/init.sh NAME [--description TEXT] [--owner NAME]`: names a new project in one step
+- `scripts/init.sh NAME [--description TEXT] [--owner NAME] [--license SPDX]`: names a new project in one step
   (see below)
 - `scripts/gates.sh`: every check the workflows run, locally (fmt, typos, deny, clippy and
   tests at three feature levels, docs); `scripts/gates.sh clippy full` runs one of them

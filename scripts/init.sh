@@ -2,12 +2,16 @@
 # Turns the template into a named project. Run once, right after creating the repository
 # from the template; it deletes itself when done.
 #
-#   scripts/init.sh NAME [--description TEXT] [--owner NAME]
+#   scripts/init.sh NAME [--description TEXT] [--owner NAME] [--license SPDX]
 #
 # NAME          the binary's name: lowercase letters, digits and dashes (my-app).
 #               binary-crate/ becomes NAME/, crate/ becomes libNAME/ (Rust path libmy_app).
 # --description one line for Cargo.toml and the README.
 # --owner       the copyright holder in LICENSE (default: git config user.name).
+# --license     an SPDX expression: MIT (default), Apache-2.0, "MIT OR Apache-2.0",
+#               GPL-3.0-only, MPL-2.0, ... Set in Cargo.toml and allowed in deny.toml
+#               (cargo deny checks the project's own crates too). Anything but MIT leaves
+#               LICENSE as a TODO for the license's official text.
 #
 # It renames the crates everywhere they're named (manifests, code, the crate lists in
 # deploy.yml and test.yml), fills in Cargo.toml's description and repository and the
@@ -19,13 +23,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-usage() { sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
-name="" description="" owner=""
+name="" description="" owner="" license="MIT"
 while [ $# -gt 0 ]; do
     case "$1" in
         --description) description="${2:?--description needs a value}"; shift 2 ;;
         --owner) owner="${2:?--owner needs a value}"; shift 2 ;;
+        --license) license="${2:?--license needs a value}"; shift 2 ;;
         -h | --help) usage ;;
         -*) echo "unknown option $1" >&2; usage 2 ;;
         *) [ -z "$name" ] || { echo "one NAME only" >&2; usage 2; }; name="$1"; shift ;;
@@ -36,6 +41,7 @@ done
 [[ "$name" =~ ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ ]] || { echo "NAME must be lowercase letters, digits and single dashes, starting with a letter: $name" >&2; exit 2; }
 case "$name" in crate | binary-crate | lib*) echo "NAME is the binary's name; the library gets the lib prefix itself: $name" >&2; exit 2 ;; esac
 [ -d crate ] && [ -d binary-crate ] || { echo "already initialised (no crate/ and binary-crate/)" >&2; exit 2; }
+[[ "$license" =~ ^[A-Za-z0-9.+()\ -]+$ ]] || { echo "--license must be an SPDX expression, like MIT or \"MIT OR Apache-2.0\": $license" >&2; exit 2; }
 command -v perl >/dev/null || { echo "perl is needed" >&2; exit 2; }
 
 lib="lib$name"
@@ -86,13 +92,33 @@ done
 echo "==> Cargo.toml metadata"
 desc_toml=${description//\\/\\\\}
 desc_toml=${desc_toml//\"/\\\"}
-DESC="$desc_toml" REPO="$repository" perl -pi -e '
+DESC="$desc_toml" REPO="$repository" LICENSE_EXPR="$license" perl -pi -e '
     s/^description = .*/description = "$ENV{DESC}"/;
     s/^repository = .*/repository = "$ENV{REPO}"/;
+    s/^license = .*/license = "$ENV{LICENSE_EXPR}"/;
 ' Cargo.toml
 
-echo "==> LICENSE"
-YEAR="$year" OWNER="$owner" perl -pi -e 's/<YEAR>/$ENV{YEAR}/; s/<OWNER>/$ENV{OWNER}/' LICENSE
+echo "==> LICENSE ($license)"
+if [ "$license" = MIT ]; then
+    YEAR="$year" OWNER="$owner" perl -pi -e 's/<YEAR>/$ENV{YEAR}/; s/<OWNER>/$ENV{OWNER}/' LICENSE
+else
+    echo "TODO: replace this file with the full text of $license, copyright $year $owner." > LICENSE
+    echo "warning: LICENSE needs the official text of $license (see the SPDX license list);" >&2
+    [[ "$license" == *" OR "* ]] && echo "         for a choice of licenses, the Rust convention is one file each (LICENSE-MIT, LICENSE-APACHE)." >&2
+fi
+# Each license in the expression (split on OR/AND; "X WITH Y" stays whole) must be allowed,
+# since cargo deny checks the workspace's own crates too.
+perl -e '
+    my $expr = shift; $expr =~ s/[()]/ /g;
+    my @ids = grep { length } map { s/^\s+|\s+$//gr } split /\s+(?:OR|AND)\s+/, $expr;
+    local $/; open my $fh, "<", "deny.toml" or die; my $toml = <$fh>; close $fh;
+    for my $id (@ids) {
+        next if $toml =~ /^\s*"\Q$id\E",\s*$/m;
+        $toml =~ s/^(allow = \[\n)/$1    "$id",\n/m or die "no allow list in deny.toml\n";
+        print "    allowed in deny.toml: $id\n";
+    }
+    open $fh, ">", "deny.toml" or die; print $fh $toml;
+' "$license"
 
 echo "==> README.md"
 cat > README.md <<EOF
@@ -123,7 +149,7 @@ scripts/stress.sh 20  # every test binary 20 times in parallel
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+$license, see [LICENSE](LICENSE).
 EOF
 
 echo "==> template-only parts"

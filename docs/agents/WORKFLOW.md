@@ -37,13 +37,24 @@ Before changing anything:
 
 ## 1. Bootstrap (raw template only)
 
-1. Choose the project name: the user's, else a short lowercase name derived from the
+1. **Ask the license first**, before anything else and even when the request is otherwise
+   clear: it's the user's decision alone, never a default you pick. Offer the common ones
+   with a one-line note each: MIT (permissive; the template has its text),
+   `MIT OR Apache-2.0` (the Rust ecosystem's convention, adds a patent grant), Apache-2.0,
+   MPL-2.0 (file-level copyleft), GPL-3.0-only (strong copyleft). Any SPDX expression
+   works. Wait for the answer; if you already have phase 2 questions, ask them in the same
+   message.
+2. Choose the project name: the user's, else a short lowercase name derived from the
    request (`imgshrink`, `todo-sync`). It becomes the binary's name and the library's
    (`lib<name>`).
-2. `scripts/init.sh <name> --description "<one line>"`. For a library only, delete
-   `<name>/` afterwards and its entries in `Cargo.toml`, `deploy.yml` and `test.yml`.
-   Check the output for warnings, and `git status`.
-3. `scripts/gates.sh`, then commit: `chore: initialise <name> from the template`.
+3. `scripts/init.sh <name> --description "<one line>" --license "<SPDX>"`. For a library
+   only, delete `<name>/` afterwards and its entries in `Cargo.toml`, `deploy.yml` and
+   `test.yml`. Check the output for warnings, and `git status`.
+4. For any license but MIT, `init.sh` leaves `LICENSE` as a TODO: put the license's
+   official, unmodified text there (the SPDX license list links it), never a version
+   written from memory. For a choice like `MIT OR Apache-2.0`, use one file per license
+   (`LICENSE-MIT`, `LICENSE-APACHE`) instead of `LICENSE`.
+5. `scripts/gates.sh`, then commit: `chore: initialise <name> from the template`.
 
 The greeting code in the template's crates is a placeholder. Replace it as the plan's first steps
 implement real behaviour; delete what's left of it once nothing uses it.
