@@ -1,0 +1,151 @@
+# Release on a version tag: `git tag v0.2.0 && git push origin v0.2.0`
+# (docs/agents/RELEASE.md). Runs CI, checks the tag matches the crates' version, builds
+# every binary for each target, creates the GitHub release with the CHANGELOG section as
+# notes, then publishes to crates.io if the CARGO_REGISTRY_TOKEN secret is set.
+# workflow_dispatch builds without releasing, to try the pipeline.
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
+  meta:
+    name: version and binaries
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      binaries: ${{ steps.meta.outputs.binaries }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - id: meta
+        run: |
+          metadata=$(cargo metadata --no-deps --format-version 1)
+          version=$(jq -r '[.packages[].version] | unique | if length == 1 then .[0] else error("the crates have different versions: \(.)") end' <<<"$metadata")
+          binaries=$(jq -c '[.packages[].targets[] | select(.kind | index("bin")) | .name]' <<<"$metadata")
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME doesn't match the crates' version $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "binaries=$binaries" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: [ci, meta]
+    if: needs.meta.outputs.binaries != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        # Trim this list to the platforms the project supports. The arm64 Linux runner is
+        # free for public repositories only.
+        include:
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-latest }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm }
+          - { target: aarch64-apple-darwin, os: macos-latest }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+      - run: cargo build --release --locked --workspace --target ${{ matrix.target }}
+      - name: Package
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+          BINARIES: ${{ needs.meta.outputs.binaries }}
+          TARGET: ${{ matrix.target }}
+          NAME: ${{ github.event.repository.name }}
+        run: |
+          dir="$NAME-$VERSION-$TARGET"
+          mkdir -p "dist/$dir"
+          ext=""; [[ "$TARGET" == *windows* ]] && ext=".exe"
+          for bin in $(jq -r '.[]' <<<"$BINARIES"); do
+            cp "target/$TARGET/release/$bin$ext" "dist/$dir/"
+          done
+          cp README.md LICENSE CHANGELOG.md "dist/$dir/"
+          [ -d examples ] && cp -r examples "dist/$dir/"
+          cd dist
+          if [[ "$TARGET" == *windows* ]]; then
+            7z a -bd "$dir.zip" "$dir" >/dev/null && archive="$dir.zip"
+          else
+            tar -czf "$dir.tar.gz" "$dir" && archive="$dir.tar.gz"
+          fi
+          if command -v sha256sum >/dev/null; then sha256sum "$archive"; else shasum -a 256 "$archive"; fi > "$archive.sha256"
+          rm -r "$dir"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*
+
+  github-release:
+    name: GitHub release
+    needs: [meta, build]
+    # Also runs for a library-only workspace, where `build` is skipped.
+    if: >-
+      always() && github.ref_type == 'tag' && needs.meta.result == 'success'
+      && (needs.build.result == 'success' || needs.build.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Release notes from CHANGELOG.md
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          # The section headed with this version, else the Unreleased one.
+          # Headings look like `## [0.2.0] - 2026-01-01` or `## Unreleased`.
+          section() { awk -v h="$1" '/^## / { if (found) exit; t = $2; gsub(/[][]/, "", t); found = (t == h); next } found' CHANGELOG.md; }
+          notes=$(section "$VERSION")
+          [ -n "$(tr -d '[:space:]' <<<"$notes")" ] || notes=$(section "Unreleased")
+          printf '%s\n' "$notes" > notes.md
+          cat notes.md
+      - uses: softprops/action-gh-release@v3
+        with:
+          body_path: notes.md
+          files: dist/*
+          fail_on_unmatched_files: false
+
+  publish:
+    name: crates.io
+    needs: github-release
+    if: always() && needs.github-release.result == 'success'
+    runs-on: ubuntu-latest
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Publish
+        # Publishes every crate in dependency order; mark a crate `publish = false` to keep
+        # it off crates.io. Without the secret, the release stops at GitHub.
+        run: |
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "::notice::CARGO_REGISTRY_TOKEN isn't set; not publishing to crates.io"
+            exit 0
+          fi
+          cargo publish --workspace --locked

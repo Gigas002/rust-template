@@ -1,0 +1,22 @@
+# New RustSec advisories (a vulnerability, an unmaintained crate) appear without any change
+# to this repository, so check every day instead of waiting for the next push.
+name: Advisories
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  advisories:
+    name: cargo deny check advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - run: cargo deny check advisories
