@@ -1,0 +1,22 @@
+[package]
+name = "libskel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "../README.md"
+
+[features]
+default = ["extra"]
+# One feature per optional capability (docs/ARCHITECTURE.md §1.4).
+extra = []
+
+[dependencies]
+thiserror.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,4 @@
+# For rustup users: the toolchain and the components the quality gates need.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]

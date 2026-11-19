@@ -1,0 +1,31 @@
+[package]
+name = "skel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "../README.md"
+
+[features]
+default = ["extra"]
+extra = ["libskel/extra"]
+
+[dependencies]
+libskel.workspace = true
+
+clap.workspace = true
+dirs.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

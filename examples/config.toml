@@ -1,0 +1,15 @@
+# skel's config file: ~/.config/skel/config.toml on Linux, or the path given with
+# --config. Every key is optional and shown here with its default; the command line
+# overrides each one. Unknown keys are errors, so a typo fails instead of being ignored.
+
+# Who to greet.
+name = "world"
+
+# The greeting word.
+greeting = "Hello"
+
+# Print the greeting in capitals (needs the `extra` feature).
+shout = false
+
+# How much to log to stderr: off, error, warn, info, debug or trace.
+log_level = "warn"

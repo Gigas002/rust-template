@@ -1,4 +1,6 @@
+# typos (https://github.com/crate-ci/typos). Words that aren't typos go here.
 [default.extend-words]
 ratatui = "ratatui"
+
 [files]
-extend-exclude = [ "target/", ]
+extend-exclude = ["target/"]

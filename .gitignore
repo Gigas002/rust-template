@@ -1,16 +1,21 @@
-# Mac OS files
+# Build output
+/target
+build/
+
+# Coverage and profiling leftovers: never commit these
+*.profraw
+*.profdata
+lcov*.info
+
+# OS files
 .DS_Store
 
-# Project specific files
-build/
-.cache
-
-# Rust (workspace)
-/target
-
-# Editors files
+# Editors
 .vscode/
 .idea/
 .cursor/
 .zed/
 .zeditor/
+
+# Local caches
+.cache
